@@ -7,6 +7,8 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.linear_model import LassoCV
 from sklearn.metrics import make_scorer, mean_squared_error
 from sklearn.preprocessing import PolynomialFeatures
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.preprocessing import FunctionTransformer
 
 def main(q=1.00, alphas=None, n_splits=10):
     # 1. Učitavanje i drop_duplicates
@@ -48,10 +50,15 @@ def main(q=1.00, alphas=None, n_splits=10):
     # 4. LassoCV unutar pipeline
     if alphas is None:
         alphas = np.logspace(-3, 3, 50)
-    pipeline = Pipeline([
+    base_pipeline = Pipeline([
         ("prep", preprocessor),
         ("lasso", LassoCV(alphas=alphas, cv=5, random_state=42, n_jobs=-1, max_iter=5000))
     ])
+
+    ttr = TransformedTargetRegressor(
+        regressor=base_pipeline,
+        transformer=FunctionTransformer(func=np.log1p, inverse_func=np.expm1)
+    )
 
     # 5. Definišemo scorer za RMSE
     rmse_scorer = make_scorer(mean_squared_error, squared=False)
@@ -59,24 +66,19 @@ def main(q=1.00, alphas=None, n_splits=10):
     # 6. K-fold cross-validation
     cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     # cross_val_score će pozvati fit/predict za svaki fold; LassoCV će unutar toga optimizovati alpha
-    scores = cross_val_score(pipeline, X, y,
-                             scoring=rmse_scorer,
-                             cv=cv,
-                             n_jobs=-1)
+    scores = cross_val_score(
+        ttr, X, y,
+        scoring=rmse_scorer,
+        cv=cv,
+        n_jobs=-1
+    )
+    print(f"{n_splits}-fold CV RMSE (log-y): "
+          f"{scores.mean():.2f} ± {scores.std():.2f} EUR")
 
-    print(f"{n_splits}-fold CV RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
-
-    # 7. Finalno fitovanje na celom skupu i best alpha
-    pipeline.fit(X, y)
-    best_alpha = pipeline.named_steps["lasso"].alpha_
-    print(f"Best α (na celom skupu): {best_alpha:.5f}")
-
-    return {
-        "cv_rmse_mean": scores.mean(),
-        "cv_rmse_std": scores.std(),
-        "best_alpha": best_alpha,
-        "model": pipeline
-    }
+    # 7. Fit i best alpha na celom skupu
+    ttr.fit(X, y)
+    best_alpha = ttr.regressor_.named_steps["lasso"].alpha_
+    print(f"Best α (log-y, na celom skupu): {best_alpha:.5f}")
 
 
 if __name__ == "__main__":
