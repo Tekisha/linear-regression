@@ -1,118 +1,120 @@
 import pandas as pd
-import seaborn as sns
-import matplotlib
-from sklearn.model_selection import train_test_split, GridSearchCV
+import numpy as np
+
+# Sklearn
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import RidgeCV
-from sklearn.model_selection import cross_val_score
+from sklearn.linear_model import Lasso
 from sklearn.metrics import mean_squared_error
-import numpy as np
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-from sklearn.linear_model import LassoCV
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.compose import TransformedTargetRegressor
 
-def main():
-    q = 1.00
-    df0 = pd.read_csv("train.tsv", sep="\t").drop_duplicates()
-    X_full = df0.drop(columns=["Cena"])
-    y_full = df0["Cena"]
+def load_data(path: str):
+    """
+    Učitaj TSV fajl, ukloni duplikate i podeli na X i y.
+    """
+    df = pd.read_csv(path, sep="\t").drop_duplicates()
+    X = df.drop(columns=["Cena"])
+    y = df["Cena"]
+    return X, y
 
-    X_train_full, X_test_final, y_train_full, y_test_final = train_test_split(
-        X_full, y_full, test_size=0.2, random_state=42
-    )
+def split_data(X, y, test_size=0.2, random_state=42):
+    """
+    Podeli podatke na train i test set.
+    """
+    return train_test_split(X, y, test_size=test_size, random_state=random_state)
 
-    th = y_train_full.quantile(q)
-    mask = y_train_full <= th
-    X_train_filt = X_train_full[mask]
-    y_train_filt = y_train_full[mask]
-    print(f"Filter q={q:.2f} → treniraš na {len(y_train_filt)} od {len(y_train_full)} primera (th={th:.0f} EUR)")
+def build_preprocessor(numeric_features, categorical_features):
+    """
+    Napravi ColumnTransformer koji:
+      - standardizuje numeričke
+      - one-hot enkoduje kategorijske
+    """
+    num_pipeline = Pipeline([
+        ("scaler", StandardScaler())
+    ])
+    cat_pipeline = Pipeline([
+        ("ohe", OneHotEncoder(handle_unknown="ignore"))
+    ])
+    preprocessor = ColumnTransformer([
+        ("num", num_pipeline, numeric_features),
+        ("cat", cat_pipeline, categorical_features)
+    ])
+    return preprocessor
 
-    num_feats = ["Godina proizvodnje", "Zapremina motora", "Kilometraza", "Konjske snage"]
-    cat_feats = ["Marka", "Grad", "Karoserija", "Gorivo", "Menjac"]
-
-    num_pipe = Pipeline([("scaler", StandardScaler())])
-    cat_pipe = Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore"))])
-    preprocessor = ColumnTransformer([("num", num_pipe, num_feats),
-                                      ("cat", cat_pipe, cat_feats)])
-
-    # 1) Definiši bazni Ridge regressor
-    lasso_cv = LassoCV(
-        alphas=np.logspace(-3, 3, 50),  # testira alfe od 1e-3 do 1e3
+def build_model(preprocessor):
+    """
+    Napravi pipeline sa preprocesorom i Lasso regresijom.
+    Parametre alpha okrećemo kroz GridSearchCV.
+    """
+    pipe = Pipeline([
+        ("prep", preprocessor),
+        ("lasso", Lasso(max_iter=10_000, random_state=42))
+    ])
+    # Pretraga najboljeg alpha
+    param_grid = {
+        "lasso__alpha": np.logspace(-3, 2, 50)
+    }
+    search = GridSearchCV(
+        pipe,
+        param_grid,
         cv=5,
-        random_state=42,
+        scoring="neg_root_mean_squared_error",
         n_jobs=-1
     )
+    return search
 
-    # --- 4. Obavij Lasso log-transformom cilja ---
-    model = TransformedTargetRegressor(
-        regressor=Pipeline([
-            ("prep", preprocessor),
-            ("lasso", lasso_cv)
-        ]),
-        func=np.log1p,
-        inverse_func=np.expm1
+def evaluate(model, X_train, y_train, X_test, y_test):
+    """
+    Izračunaj kros-validacioni RMSE na train-setu i konačni RMSE na testu.
+    """
+    # Cross-validation score (neg RMSE), pretvorimo u pozitivni RMSE
+    cv_scores = cross_val_score(
+        model, X_train, y_train,
+        cv=5,
+        scoring="neg_root_mean_squared_error",
+        n_jobs=-1
     )
+    cv_rmse = -cv_scores.mean()
+    print(f"CV RMSE (5-fold): {cv_rmse:.2f} EUR")
 
-    model.fit(X_train_filt, y_train_filt)
-    print("Odabrano alpha za Lasso:", model.regressor_.named_steps["lasso"].alpha_)
+    # Fit na celom train setu i evaluacija na testu
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    test_rmse = mean_squared_error(y_test, y_pred, squared=False)
+    print(f"Test RMSE: {test_rmse:.2f} EUR")
+    print(f"Odabrano alpha: {model.best_params_['lasso__alpha']:.5f}")
 
-    # 2) Uzmi sam pipeline iz TransformedTargetRegressor
-    pipe: Pipeline = model.regressor_
+def main():
+    # 1. Učitaj podatke
+    X, y = load_data("train.tsv")
 
-    # 3) Izvuci ColumnTransformer
-    ct: ColumnTransformer = pipe.named_steps["prep"]
+    # 2. Definiši feature-e
+    numeric_feats = [
+        "Godina proizvodnje",
+        "Zapremina motora",
+        "Kilometraza",
+        "Konjske snage"
+    ]
+    categorical_feats = [
+        "Marka",
+        "Grad",
+        "Karoserija",
+        "Gorivo",
+        "Menjac"
+    ]
 
-    # 4) Izvuci num_pipe pa StandardScaler
-    scaler: StandardScaler = ct.named_transformers_["num"].named_steps["scaler"]
+    # 3. Podela na train/test
+    X_train, X_test, y_train, y_test = split_data(X, y)
 
-    # 5) Sada možeš pogledati mean_ i scale_
-    print("Means learned:", scaler.mean_)
-    print("Stds learned: ", scaler.scale_)
+    # 4. Preprocesor
+    preprocessor = build_preprocessor(numeric_feats, categorical_feats)
 
-    y_pred = model.predict(X_test_final)
-    rmse = mean_squared_error(y_test_final, y_pred, squared=False)
-    print(f"Test RMSE nakon log-transformacije i LassoCV: {rmse:.2f} EUR")
+    # 5. Model + GridSearch za Lasso
+    model_search = build_model(preprocessor)
 
-    # print(df.shape)  # koliko redova/kolona
-    # print(df.info())  # tipovi, prazne vrednosti
-    # print(df.describe())  # osnovne statistike za numeričke kolone
-    #
-    # num_cols = ['Cena', 'Godina proizvodnje',
-    #             'Zapremina motora', 'Kilometraza', 'Konjske snage']
-    # df_num = df[num_cols]
-    #
-    # corr = df_num.corr(method='pearson')
-    #
-    # print(corr)
-    #
-    # plt.figure(figsize=(6,5))
-    # sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
-    #             vmin=-1, vmax=1, linewidths=0.5)
-    # plt.title("Matrica korelacija (numeričke kolone)")
-    # plt.tight_layout()
-    # plt.show()
+    # 6. Evaluacija
+    evaluate(model_search, X_train, y_train, X_test, y_test)
 
-    # # Histogram cene
-    # plt.figure(figsize=(8, 4))
-    # plt.hist(df['Cena'], bins=100)
-    # plt.ticklabel_format(useOffset=False, style='plain', axis='x')
-    # plt.title("Distribucija cena (bez naučne notacije)")
-    # plt.xlabel("Cena (EUR)")
-    # plt.ylabel("Broj automobila")
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # # Scatter kilometraža vs cena
-    # plt.scatter(df0['Grad'], df0['Cena'], alpha=0.3)
-    # plt.title("Grad vs Cena")
-    # plt.xlabel("Grad")
-    # plt.ylabel("Cena (EUR)")
-    # plt.show()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
