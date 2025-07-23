@@ -1,100 +1,83 @@
 import pandas as pd
-import seaborn as sns
-import matplotlib
-from sklearn.model_selection import train_test_split
+import numpy as np
+from sklearn.model_selection import KFold, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.linear_model import Ridge
-from sklearn.model_selection import cross_val_score
-from sklearn.metrics import mean_squared_error
-import numpy as np
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.linear_model import LassoCV
+from sklearn.metrics import make_scorer, mean_squared_error
+from sklearn.preprocessing import PolynomialFeatures
 
-def main():
+def main(q=1.00, alphas=None, n_splits=10):
+    # 1. Učitavanje i drop_duplicates
     df0 = pd.read_csv("train.tsv", sep="\t").drop_duplicates()
-    num_feats = ["Godina proizvodnje", "Zapremina motora", "Kilometraza", "Konjske snage"]
+
+    # 2. Filtriranje po kvantilu
+    if q < 1.0:
+        th = df0["Cena"].quantile(q)
+        df = df0[df0["Cena"] <= th].reset_index(drop=True)
+        print(f"Kvantил {q:.2f} (prag={th:.0f} EUR) → {len(df)} uzoraka")
+    else:
+        df = df0
+        print(f"Koristimo ceo skup: {len(df)} uzoraka")
+
+    CURRENT_YEAR = 2025
+    df["Starost"] = CURRENT_YEAR - df["Godina proizvodnje"]
+
+    X = df.drop(columns=["Cena"])
+    y = df["Cena"]
+
+    # 3. Pipeline definicija
+    num_feats = ["Starost", "Zapremina motora", "Kilometraza", "Konjske snage"]
     cat_feats = ["Marka", "Grad", "Karoserija", "Gorivo", "Menjac"]
 
-    num_pipe = Pipeline([("scaler", StandardScaler())])
-    cat_pipe = Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore") )])
-    preprocessor = ColumnTransformer([("num", num_pipe, num_feats),
-                                      ("cat", cat_pipe, cat_feats)])
-    base_model = Pipeline([("prep", preprocessor),
-                            ("reg", Ridge(alpha=1.0, random_state=42))])
+    num_pipe = Pipeline([
+        ("poly", PolynomialFeatures(degree=2, include_bias=False)),
+        ("scaler", StandardScaler())
+    ])
 
-    quantiles = [0.80, 0.85, 0.90, 0.95, 1.00]
+    cat_pipe = Pipeline([
+        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
+    ])
 
-    results = []
-    for q in quantiles:
-        # 1. napravi threshold i filtriraj
-        th = df0["Cena"].quantile(q)
-        df = df0[df0["Cena"] <= th]
+    preprocessor = ColumnTransformer([
+        ("num", num_pipe, num_feats),
+        ("cat", cat_pipe, cat_feats),
+    ])
 
-        # 2. split
-        X = df.drop(columns=["Cena"])
-        y = df["Cena"]
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+    # 4. LassoCV unutar pipeline
+    if alphas is None:
+        alphas = np.logspace(-3, 3, 50)
+    pipeline = Pipeline([
+        ("prep", preprocessor),
+        ("lasso", LassoCV(alphas=alphas, cv=5, random_state=42, n_jobs=-1, max_iter=5000))
+    ])
 
-        # 3. cross-val RMSE na treningu
-        neg_mse = cross_val_score(base_model, X_train, y_train,
-                                  scoring="neg_root_mean_squared_error", cv=5, n_jobs=-1)
-        cv_rmse = -neg_mse.mean()
+    # 5. Definišemo scorer za RMSE
+    rmse_scorer = make_scorer(mean_squared_error, squared=False)
 
-        # 4. fit i test RMSE
-        base_model.fit(X_train, y_train)
-        y_pred = base_model.predict(X_test)
-        test_rmse = mean_squared_error(y_test, y_pred, squared=False)
+    # 6. K-fold cross-validation
+    cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    # cross_val_score će pozvati fit/predict za svaki fold; LassoCV će unutar toga optimizovati alpha
+    scores = cross_val_score(pipeline, X, y,
+                             scoring=rmse_scorer,
+                             cv=cv,
+                             n_jobs=-1)
 
-        results.append((q, cv_rmse, test_rmse))
-        print(f"Quantile {q:.2f} → CV RMSE: {cv_rmse:.0f}, Test RMSE: {test_rmse:.0f}")
+    print(f"{n_splits}-fold CV RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
 
-    # 5. pronađi najbolji (po CV ili po testu)
-    best = min(results, key=lambda x: x[1])  # po CV
-    print(f"\nNajbolji kvantil po CV RMSE: {best[0]:.2f} → {best[1]:.0f}")
+    # 7. Finalno fitovanje na celom skupu i best alpha
+    pipeline.fit(X, y)
+    best_alpha = pipeline.named_steps["lasso"].alpha_
+    print(f"Best α (na celom skupu): {best_alpha:.5f}")
 
-    # Ako hoćeš po test:
-    best_test = min(results, key=lambda x: x[2])
-    print(f"Najbolji kvantil po Test RMSE: {best_test[0]:.2f} → {best_test[2]:.0f}")
+    return {
+        "cv_rmse_mean": scores.mean(),
+        "cv_rmse_std": scores.std(),
+        "best_alpha": best_alpha,
+        "model": pipeline
+    }
 
-    # print(df.shape)  # koliko redova/kolona
-    # print(df.info())  # tipovi, prazne vrednosti
-    # print(df.describe())  # osnovne statistike za numeričke kolone
-    #
-    # num_cols = ['Cena', 'Godina proizvodnje',
-    #             'Zapremina motora', 'Kilometraza', 'Konjske snage']
-    # df_num = df[num_cols]
-    #
-    # corr = df_num.corr(method='pearson')
-    #
-    # print(corr)
-    #
-    # plt.figure(figsize=(6,5))
-    # sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
-    #             vmin=-1, vmax=1, linewidths=0.5)
-    # plt.title("Matrica korelacija (numeričke kolone)")
-    # plt.tight_layout()
-    # plt.show()
 
-    # # Histogram cene
-    # plt.figure(figsize=(8, 4))
-    # plt.hist(df['Cena'], bins=100)
-    # plt.ticklabel_format(useOffset=False, style='plain', axis='x')
-    # plt.title("Distribucija cena (bez naučne notacije)")
-    # plt.xlabel("Cena (EUR)")
-    # plt.ylabel("Broj automobila")
-    # plt.tight_layout()
-    # plt.show()
-    #
-    # # Scatter kilometraža vs cena
-    # plt.scatter(df['Kilometraza'], df['Cena'], alpha=0.3)
-    # plt.title("Kilometraža vs Cena")
-    # plt.xlabel("Kilometraža (km)")
-    # plt.ylabel("Cena (EUR)")
-    # plt.show()
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    stats = main(q=0.90, alphas=np.logspace(-4, 2, 100), n_splits=5)
