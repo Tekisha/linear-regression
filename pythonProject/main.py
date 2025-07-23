@@ -1,64 +1,82 @@
 import pandas as pd
 import seaborn as sns
 import matplotlib
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.linear_model import Ridge
+from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_squared_error
 import numpy as np
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
+from sklearn.linear_model import LassoCV
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.compose import TransformedTargetRegressor
 
 def main():
+    q = 1.00
     df0 = pd.read_csv("train.tsv", sep="\t").drop_duplicates()
+    X_full = df0.drop(columns=["Cena"])
+    y_full = df0["Cena"]
+
+    X_train_full, X_test_final, y_train_full, y_test_final = train_test_split(
+        X_full, y_full, test_size=0.2, random_state=42
+    )
+
+    th = y_train_full.quantile(q)
+    mask = y_train_full <= th
+    X_train_filt = X_train_full[mask]
+    y_train_filt = y_train_full[mask]
+    print(f"Filter q={q:.2f} → treniraš na {len(y_train_filt)} od {len(y_train_full)} primera (th={th:.0f} EUR)")
+
     num_feats = ["Godina proizvodnje", "Zapremina motora", "Kilometraza", "Konjske snage"]
     cat_feats = ["Marka", "Grad", "Karoserija", "Gorivo", "Menjac"]
 
     num_pipe = Pipeline([("scaler", StandardScaler())])
-    cat_pipe = Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore") )])
+    cat_pipe = Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore"))])
     preprocessor = ColumnTransformer([("num", num_pipe, num_feats),
                                       ("cat", cat_pipe, cat_feats)])
-    base_model = Pipeline([("prep", preprocessor),
-                            ("reg", Ridge(alpha=1.0, random_state=42))])
 
-    quantiles = [0.80, 0.85, 0.90, 0.95, 1.00]
+    # 1) Definiši bazni Ridge regressor
+    lasso_cv = LassoCV(
+        alphas=np.logspace(-3, 3, 50),  # testira alfe od 1e-3 do 1e3
+        cv=5,
+        random_state=42,
+        n_jobs=-1
+    )
 
-    results = []
-    for q in quantiles:
-        # 1. napravi threshold i filtriraj
-        th = df0["Cena"].quantile(q)
-        df = df0[df0["Cena"] <= th]
+    # --- 4. Obavij Lasso log-transformom cilja ---
+    model = TransformedTargetRegressor(
+        regressor=Pipeline([
+            ("prep", preprocessor),
+            ("lasso", lasso_cv)
+        ]),
+        func=np.log1p,
+        inverse_func=np.expm1
+    )
 
-        # 2. split
-        X = df.drop(columns=["Cena"])
-        y = df["Cena"]
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+    model.fit(X_train_filt, y_train_filt)
+    print("Odabrano alpha za Lasso:", model.regressor_.named_steps["lasso"].alpha_)
 
-        # 3. cross-val RMSE na treningu
-        neg_mse = cross_val_score(base_model, X_train, y_train,
-                                  scoring="neg_root_mean_squared_error", cv=5, n_jobs=-1)
-        cv_rmse = -neg_mse.mean()
+    # 2) Uzmi sam pipeline iz TransformedTargetRegressor
+    pipe: Pipeline = model.regressor_
 
-        # 4. fit i test RMSE
-        base_model.fit(X_train, y_train)
-        y_pred = base_model.predict(X_test)
-        test_rmse = mean_squared_error(y_test, y_pred, squared=False)
+    # 3) Izvuci ColumnTransformer
+    ct: ColumnTransformer = pipe.named_steps["prep"]
 
-        results.append((q, cv_rmse, test_rmse))
-        print(f"Quantile {q:.2f} → CV RMSE: {cv_rmse:.0f}, Test RMSE: {test_rmse:.0f}")
+    # 4) Izvuci num_pipe pa StandardScaler
+    scaler: StandardScaler = ct.named_transformers_["num"].named_steps["scaler"]
 
-    # 5. pronađi najbolji (po CV ili po testu)
-    best = min(results, key=lambda x: x[1])  # po CV
-    print(f"\nNajbolji kvantil po CV RMSE: {best[0]:.2f} → {best[1]:.0f}")
+    # 5) Sada možeš pogledati mean_ i scale_
+    print("Means learned:", scaler.mean_)
+    print("Stds learned: ", scaler.scale_)
 
-    # Ako hoćeš po test:
-    best_test = min(results, key=lambda x: x[2])
-    print(f"Najbolji kvantil po Test RMSE: {best_test[0]:.2f} → {best_test[2]:.0f}")
+    y_pred = model.predict(X_test_final)
+    rmse = mean_squared_error(y_test_final, y_pred, squared=False)
+    print(f"Test RMSE nakon log-transformacije i LassoCV: {rmse:.2f} EUR")
 
     # print(df.shape)  # koliko redova/kolona
     # print(df.info())  # tipovi, prazne vrednosti
@@ -90,9 +108,9 @@ def main():
     # plt.show()
     #
     # # Scatter kilometraža vs cena
-    # plt.scatter(df['Kilometraza'], df['Cena'], alpha=0.3)
-    # plt.title("Kilometraža vs Cena")
-    # plt.xlabel("Kilometraža (km)")
+    # plt.scatter(df0['Grad'], df0['Cena'], alpha=0.3)
+    # plt.title("Grad vs Cena")
+    # plt.xlabel("Grad")
     # plt.ylabel("Cena (EUR)")
     # plt.show()
 
