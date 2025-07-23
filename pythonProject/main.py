@@ -57,7 +57,8 @@ def main(q=1.00, alphas=None, n_splits=10):
 
     ttr = TransformedTargetRegressor(
         regressor=base_pipeline,
-        transformer=FunctionTransformer(func=np.log1p, inverse_func=np.expm1)
+        transformer=FunctionTransformer(func=np.log1p,
+                                        inverse_func=np.expm1)
     )
 
     # 5. Definišemo scorer za RMSE
@@ -66,19 +67,24 @@ def main(q=1.00, alphas=None, n_splits=10):
     # 6. K-fold cross-validation
     cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     # cross_val_score će pozvati fit/predict za svaki fold; LassoCV će unutar toga optimizovati alpha
-    scores = cross_val_score(
-        ttr, X, y,
-        scoring=rmse_scorer,
-        cv=cv,
-        n_jobs=-1
-    )
-    print(f"{n_splits}-fold CV RMSE (log-y): "
-          f"{scores.mean():.2f} ± {scores.std():.2f} EUR")
+    scores = cross_val_score(ttr, X, y,
+                             scoring=rmse_scorer,
+                             cv=cv,
+                             n_jobs=-1)
 
-    # 7. Fit i best alpha na celom skupu
+    print(f"{n_splits}-fold CV RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
+
+    # 7. Finalno fitovanje na celom skupu i best alpha
     ttr.fit(X, y)
     best_alpha = ttr.regressor_.named_steps["lasso"].alpha_
-    print(f"Best α (log-y, na celom skupu): {best_alpha:.5f}")
+    print(f"Best α (na celom skupu): {best_alpha:.5f}")
+
+    return {
+        "cv_rmse_mean": scores.mean(),
+        "cv_rmse_std": scores.std(),
+        "best_alpha": best_alpha,
+        "model": ttr
+    }
 
 
 if __name__ == "__main__":
