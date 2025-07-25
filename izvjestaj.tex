@@ -80,7 +80,7 @@ U cilju grafičke analize podataka, korišćeni su sledeći prikazi:
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{scatter_starost_vs_cena.png}
-    \caption{Raspodela cijene u odnosu na starost vozila}
+    \caption{Raspodjela cijene u odnosu na starost vozila}
     \label{fig:starost_vs_cena}
 \end{figure}
 
@@ -134,20 +134,35 @@ Pre nego što je model treniran, podaci su prošli kroz preprocesiranje sa cilje
     \end{itemize}
     Svaka od njih je kodirana tehnikom \textbf{One-Hot Encoding} kako bi se izbjegle greške pri predikciji na test skupu.
 
-    \item \textbf{Log-transformacija ciljne promenljive} – Cijena automobila, kao ciljna promenljiva, ima izraženu asimetričnu raspodjelu sa teškim desnim repom. Da bi se smanjio uticaj outlier-a i poboljšala stabilnost modela, izvršena je log-transformacija putem funkcije $\log(1 + y)$ pomoću \texttt{FunctionTransformer}. Predikcije su potom inverzno transformisane pomoću $\exp(y) - 1$.
+    \item \textbf{Log-transformacija ciljne promenljive} – Cijena automobila, kao ciljna promjenljiva, ima izraženu asimetričnu raspodjelu sa teškim desnim repom. Da bi se smanjio uticaj outlier-a i poboljšala stabilnost modela, izvršena je log-transformacija putem funkcije $\log(1 + y)$ pomoću \texttt{FunctionTransformer}. Predikcije su potom inverzno transformisane pomoću $\exp(y) - 1$.
 	\begin{figure}[H]
 	    \centering
 	    \includegraphics[width=\textwidth]{log_transformacija_cena.png}
-	    \caption{Distribucija ciljne promenljive pre i posle log-transformacije}
+	    \caption{Distribucija ciljne promenljive prije i poslije log-transformacije}
 	    \label{fig:log_transform}
 	\end{figure}
 \end{itemize}
 
-Nakon svih koraka, numeričke i kategoričke komponente objedinjene su pomoću \texttt{ColumnTransformer}. Transformacija ciljne promenljive vršena je korišćenjem \texttt{TransformedTargetRegressor}, čime se obezbeđuje konzistentna transformacija pri treniranju i predikciji.
+Nakon svih koraka, numeričke i kategoričke komponente objedinjene su pomoću \texttt{ColumnTransformer}. Transformacija ciljne promjenljive vršena je korišćenjem \texttt{TransformedTargetRegressor}, čime se obezbjeđuje konzistentna transformacija pri treniranju i predikciji.
 
 \section{Podela skupa podataka}
 
-Podaci su podeljeni korišćenjem K-Fold cross-validation (n = 5 ili 10, u zavisnosti od eksperimenta). Kod eksperimenata sa kvantilnim filterom $q=0.90$, treniralo se samo na 90\% najjeftinijih automobila, dok je cilj bio generalizacija uz niži RMSE.
+Za treniranje i evaluaciju modela korišćena su dva režima podele podataka, u zavisnosti od konteksta pokretanja:
+
+\begin{itemize}
+    \item \textbf{Lokalna podela podataka (offline evaluacija):} Kada se pokreće lokalno (npr. tokom eksperimentisanja), koristi se samo jedan skup podataka. U tom slučaju, podaci se dele na trening i test skup pomoću funkcije \texttt{train\_test\_split} u odnosu 80:20. Da bi se očuvala reprezentativna distribucija ciljne promenljive, koristi se stratifikacija po cenovnim opsezima — konkretno, \texttt{Cena} se podeli na 5 kvantila pomoću \texttt{qcut}, a rezultat se koristi kao stratifikacioni ključ.
+
+    \item \textbf{Eksplicitna podela putem komandne linije:} Kada se skripta pokreće sa dva ulazna fajla (npr. \texttt{python model.py train.tsv test.tsv}), koristi se unapred pripremljeni trening i test skup — bez dodatne podele unutar skripte. Ova varijanta se koristi za finalnu evaluaciju modela na test skupu koji nije korišćen u fazi treniranja.
+\end{itemize}
+
+Nakon što je trening skup definisan, primenjena je \textbf{K-Fold unakrsna validacija} (\texttt{KFold}) sa brojem preklopa $k = 5$, uz opciju \texttt{shuffle=True} i fiksiran \texttt{random\_state=42} radi reproduktivnosti. Ova validacija ima dvostruku ulogu:
+
+\begin{itemize}
+    \item Unutar Lasso modela (\texttt{LassoCV}) koristi se za automatsku selekciju optimalnog hiperparametra $\alpha$.
+    \item Paralelno se koristi za procenu performansi modela korišćenjem metrike RMSE, preko funkcije \texttt{cross\_val\_score}.
+\end{itemize}
+
+Ovaj pristup omogućava robusnu procenu generalizacione sposobnosti modela bez curenja podataka iz test skupa. Nakon toga, model se trenira na celom trening skupu i koristi za evaluaciju na izdvojenom test skupu.
 
 \section{Isprobani algoritmi}
 
