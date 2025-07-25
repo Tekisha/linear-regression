@@ -145,52 +145,100 @@ Pre nego što je model treniran, podaci su prošli kroz preprocesiranje sa cilje
 
 Nakon svih koraka, numeričke i kategoričke komponente objedinjene su pomoću \texttt{ColumnTransformer}. Transformacija ciljne promjenljive vršena je korišćenjem \texttt{TransformedTargetRegressor}, čime se obezbjeđuje konzistentna transformacija pri treniranju i predikciji.
 
-\section{Podela skupa podataka}
+\section{Podjela skupa podataka}
 
-Za treniranje i evaluaciju modela korišćena su dva režima podele podataka, u zavisnosti od konteksta pokretanja:
-
-\begin{itemize}
-    \item \textbf{Lokalna podela podataka (offline evaluacija):} Kada se pokreće lokalno (npr. tokom eksperimentisanja), koristi se samo jedan skup podataka. U tom slučaju, podaci se dele na trening i test skup pomoću funkcije \texttt{train\_test\_split} u odnosu 80:20. Da bi se očuvala reprezentativna distribucija ciljne promenljive, koristi se stratifikacija po cenovnim opsezima — konkretno, \texttt{Cena} se podeli na 5 kvantila pomoću \texttt{qcut}, a rezultat se koristi kao stratifikacioni ključ.
-
-    \item \textbf{Eksplicitna podela putem komandne linije:} Kada se skripta pokreće sa dva ulazna fajla (npr. \texttt{python model.py train.tsv test.tsv}), koristi se unapred pripremljeni trening i test skup — bez dodatne podele unutar skripte. Ova varijanta se koristi za finalnu evaluaciju modela na test skupu koji nije korišćen u fazi treniranja.
-\end{itemize}
-
-Nakon što je trening skup definisan, primenjena je \textbf{K-Fold unakrsna validacija} (\texttt{KFold}) sa brojem preklopa $k = 5$, uz opciju \texttt{shuffle=True} i fiksiran \texttt{random\_state=42} radi reproduktivnosti. Ova validacija ima dvostruku ulogu:
+Za treniranje i evaluaciju modela korišćena su dva režima podjele podataka, u zavisnosti od konteksta pokretanja:
 
 \begin{itemize}
-    \item Unutar Lasso modela (\texttt{LassoCV}) koristi se za automatsku selekciju optimalnog hiperparametra $\alpha$.
-    \item Paralelno se koristi za procenu performansi modela korišćenjem metrike RMSE, preko funkcije \texttt{cross\_val\_score}.
+    \item \textbf{Lokalna podjela podataka (lokalna evaluacija):} Kada se pokreće lokalno (npr. tokom eksperimentisanja), koristi se samo jedan skup podataka. U tom slučaju, podaci se dijele na trening i test skup pomoću funkcije \texttt{train\_test\_split} u odnosu 80:20. Da bi se očuvala reprezentativna distribucija ciljne promenljive, koristi se stratifikacija po cjenovnim opsezima.
+
+    \item \textbf{Eksplicitna podela putem komandne linije:} Kada se skripta pokreće sa dva ulazna fajla (npr. \texttt{python model.py train.tsv test.tsv}), koristi se unaprijed pripremljeni trening i test skup, bez dodatne podjele unutar skripte. Ova varijanta se koristi za finalnu evaluaciju modela na test skupu koji nije korišćen u fazi treniranja.
 \end{itemize}
 
-Ovaj pristup omogućava robusnu procenu generalizacione sposobnosti modela bez curenja podataka iz test skupa. Nakon toga, model se trenira na celom trening skupu i koristi za evaluaciju na izdvojenom test skupu.
+Nakon što je trening skup definisan, primjenjena je \textbf{K-Fold unakrsna validacija} (\texttt{KFold}) sa brojem preklopa $k = 5$, uz opciju \texttt{shuffle=True} i fiksiran \texttt{random\_state=42} radi reproduktivnosti. Ova validacija ima dvostruku ulogu:
+
+\begin{itemize}
+    \item Unutar modela koristi se za automatsku selekciju optimalnog hiperparametra $\alpha$.
+    \item Paralelno se koristi za procjenu performansi modela korišćenjem metrike RMSE, preko funkcije \texttt{cross\_val\_score}.
+\end{itemize}
+
+Ovaj pristup omogućava robusnu procjenu generalizacione sposobnosti modela bez curenja podataka iz test skupa. Nakon toga, model se trenira na cijelom trening skupu i koristi za evaluaciju na izdvojenom test skupu.
 
 \section{Isprobani algoritmi}
 
-Korišćen je \texttt{LassoCV} iz \texttt{scikit-learn}, zbog sposobnosti automatske selekcije osobina i regularizacije.
+Za zadatak višestruke regresije testirana su tri regularizovana linearna modela iz biblioteke \texttt{scikit-learn}: \texttt{LassoCV}, \texttt{RidgeCV} i \texttt{ElasticNetCV}. Svi modeli korišćeni su unutar istog pipeline-a.
 
 \subsection{Podešavanje hiperparametara}
 
-\texttt{LassoCV} automatski bira vrednost regularizacionog parametra $\alpha$ testiranjem više vrednosti (logspace između $10^{-4}$ i $10^2$). Najbolja vrednost $\alpha$ pronađena je unutar svakog CV fold-a.
+\begin{itemize}
+    \item \textbf{LassoCV} bira optimalnu vrijednost regularizacionog parametra $\alpha$ iz logaritamski raspoređenog opsega od $10^{-4}$ do $10^{2}$ primjenom 5-fold unakrsne validacije.
+    \item \textbf{RidgeCV} koristi isti opseg $\alpha$ vrijednosti i takođe primjenjuje 5-fold unakrsnu validaciju.
+    \item \textbf{ElasticNetCV} osim $\alpha$ optimizuje i odnos između $L_1$ i $L_2$ regularizacije putem hiperparametra \texttt{l1\_ratio}, pri čemu su testirane vrednosti $\{0.1, 0.5, 0.9\}$.
+\end{itemize}
 
 \subsection{Rezultati}
 
-Na 5-fold cross-validaciji sa $q=0.90$, postignut je sledeći rezultat:
-\[
-\text{RMSE (log-transformisan target)} = \textbf{6361.27 ± 312.45 EUR}
-\]
+Rezultati evaluacije prikazani su kroz metriku RMSE (na originalnoj skali, nakon inverzne log-transformacije), na osnovu 5-fold unakrsne validacije i konačnog lokalnog test skupa.
 
-što je ispod zadatog praga od 6500 EUR.
+\begin{table}[H]
+\centering
+\caption{Uporedni rezultati modela sa 5-fold CV i lokalnim test skupom}
+\label{tab:modeli}
+\begin{tabularx}{\textwidth}{l >{\centering\arraybackslash}X >{\centering\arraybackslash}X >{\centering\arraybackslash}X}
+\toprule
+\textbf{Model} & \textbf{CV RMSE (mean ± std)} & \textbf{Test RMSE} & \textbf{Izabrani hiperparametri} \\
+\midrule
+LassoCV & $3045.09 \pm 250.22$ & $2638.25$ & $\alpha = 0.00107$ \\
+RidgeCV & $3146.33 \pm 313.29$ & $2717.87$ & $\alpha = 4.03702$ \\
+ElasticNetCV & $3049.26 \pm 269.87$ & $2657.75$ & $\alpha = 0.00187$, $l_1 = 0.50$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Diskusija}
+
+Sva tri modela uspješno zadovoljavaju uslov RMSE < 6500 EUR na lokalnom  test skupu. Najbolje performanse ostvario je \textbf{LassoCV}, zahvaljujući sposobnosti selekcije relevantnih osobina putem $L_1$ regularizacije. Ridge je pokazao nešto lošije rezultate, dok je ElasticNet dao kompromis između prethodna dva pristupa.
 
 \section{Odabrano rešenje}
 
-Finalno rešenje koristi sledeće komponente:
+Nakon eksperimentisanja sa različitim tehnikama preprocesiranja i modelima, kao najefikasnije rješenje izabran je model baziran na \texttt{LassoCV} regresiji sa sledećom konfiguracijom:
+
 \begin{itemize}
-    \item Preprocesiranje: polinomske osobine + standardizacija + one-hot encoding
-    \item Regresor: \texttt{LassoCV} sa automatskom selekcijom $\alpha$
-    \item Transformacija ciljne promenljive: $\log(1 + y)$
+    \item \textbf{Preprocesiranje podataka}:
+    \begin{itemize}
+        \item Numeričke promjenljive: proširene polinomskim osobinama drugog stepena (\texttt{PolynomialFeatures}) i zatim standardizovane pomoću Z-score standardizacije (\texttt{StandardScaler}).
+        \item Kategoričke promenljive: kodirane One-Hot encoding-om sa ignorisanjem nepoznatih vrijednosti u test skupu.
+        \item Inženjering osobina: uvedena nova numerička promjenljiva -- starost automobila (\texttt{Starost = 2025 - Godina proizvodnje}).
+    \end{itemize}
+    
+    \item \textbf{Transformacija ciljne promjenljive}:
+    \begin{itemize}
+        \item Zbog izražene asimetrične distribucije cijena sa dugim desnim repom, izvršena je log-transformacija ciljne promjenljive pomoću $\log(1 + y)$, implementirana preko \texttt{FunctionTransformer}.
+        \item Predikcije su inverzno transformisane sa $\exp(y) - 1$ kako bi se vratile na originalnu skalu.
+    \end{itemize}
+    
+    \item \textbf{Model}:
+    \begin{itemize}
+        \item Regresor: \texttt{LassoCV} sa unakrsnom validacijom (\texttt{cv=5}) i automatskom selekcijom optimalnog hiperparametra $\alpha$ iz logaritamski raspoređenog skupa vrijednosti između $10^{-4}$ i $10^2$.
+        \item Ovaj model vrši implicitnu selekciju osobina putem L1 regularizacije, što doprinosi smanjenju varijanse modela i otpornosti na overfitting.
+    \end{itemize}
+    
+    \item \textbf{Validacija i performanse}:
+    \begin{itemize}
+        \item Tokom evaluacije korišćena je K-Fold unakrsna validacija (\texttt{KFold}, $k=5$, \texttt{shuffle=True}) i lokalni test skup dobijen stratifikovanom podjelom podataka.
+        \item Postignuti rezultat na lokalnom test skupu:
+        \[
+        \text{Test RMSE} = \textbf{2638.25 EUR}
+        \]
+        što je značajno ispod zadatog praga od 6500 EUR.
+        \item Izabrana vrijednost hiperparametra:
+        \[
+        \alpha = \textbf{0.00107}
+        \]
+    \end{itemize}
 \end{itemize}
 
-Ova konfiguracija pokazala se kao najefikasnija u smislu balansa kompleksnosti i performansi, omogućavajući robusnu generalizaciju uz ispunjavanje uslova zadatka.
+Ova konfiguracija predstavlja optimalan kompromis između predikcione tačnosti, robusnosti modela i interpretabilnosti, te je odabrana kao finalno rešenje.
 
 \section*{Reference}
 

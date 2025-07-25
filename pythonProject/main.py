@@ -9,6 +9,7 @@ from sklearn.metrics import make_scorer, mean_squared_error
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.preprocessing import FunctionTransformer
+from sklearn.linear_model import RidgeCV
 import sys
 
 Q = 0.90
@@ -20,9 +21,7 @@ CURRENT_YEAR = 2025
 
 def run_training(df_train: pd.DataFrame):
     df0 = df_train.drop_duplicates()
-
     df0 = df0[df0["Cena"] <= PRICE_THRESHOLD].reset_index(drop=True)
-
     df0["Starost"] = CURRENT_YEAR - df0["Godina proizvodnje"]
 
     X = df0.drop(columns=["Cena"])
@@ -47,28 +46,20 @@ def run_training(df_train: pd.DataFrame):
 
     base_pipeline = Pipeline([
         ("prep", preprocessor),
-        ("lasso", LassoCV(alphas=ALPHAS, cv=5, random_state=42, n_jobs=-1, max_iter=10000))
+        ("ridge", RidgeCV(alphas=ALPHAS, cv=5))
     ])
 
     ttr = TransformedTargetRegressor(
         regressor=base_pipeline,
-        transformer=FunctionTransformer(func=np.log1p,
-                                        inverse_func=np.expm1)
+        transformer=FunctionTransformer(func=np.log1p, inverse_func=np.expm1)
     )
 
     rmse_scorer = make_scorer(mean_squared_error, squared=False)
-
     cv = KFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
-    scores = cross_val_score(ttr, X, y,
-                             scoring=rmse_scorer,
-                             cv=cv,
-                             n_jobs=-1)
-
-    #print(f"{N_SPLITS}-fold CV RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
-
+    scores = cross_val_score(ttr, X, y, scoring=rmse_scorer, cv=cv, n_jobs=-1)
     ttr.fit(X, y)
-    #best_alpha = ttr.regressor_.named_steps["lasso"].alpha_
-    #print(f"Best α (na celom skupu): {best_alpha:.5f}")
+    print(f"RidgeCV 5-fold RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
+    print(f"Izabrani alpha: {ttr.regressor_.named_steps['ridge'].alpha_:.5f}")
 
     return ttr
 
