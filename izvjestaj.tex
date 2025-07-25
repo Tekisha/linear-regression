@@ -50,23 +50,23 @@ Vidimo da su cijene veoma varijabilne, pri čemu se maksimalna cijena kreće i d
 U cilju grafičke analize podataka, korišćeni su sledeći prikazi:
 
 \begin{itemize}
-    \item \textbf{Histogram distribucije cena} (Slika~\ref{fig:hist_cena})
-    \item \textbf{Boxplot cena} (Slika~\ref{fig:box_cena})
+    \item \textbf{Histogram distribucije cijena} (Slika~\ref{fig:hist_cena})
+    \item \textbf{Boxplot cijena} (Slika~\ref{fig:box_cena})
     \item \textbf{Korelaciona matrica numeričkih promenljivih} (Slika~\ref{fig:corr_matrix})
-    \item \textbf{Scatterplot: Cena vs. Starost vozila} (Slika~\ref{fig:starost_vs_cena})
+    \item \textbf{Scatterplot: Cijena vs. Starost vozila} (Slika~\ref{fig:starost_vs_cena})
 \end{itemize}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{hist_cena.png}
-    \caption{Distribucija cena automobila}
+    \caption{Distribucija cijena automobila}
     \label{fig:hist_cena}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{box_cena.png}
-    \caption{Boxplot cena automobila}
+    \caption{Boxplot cijena automobila}
     \label{fig:box_cena}
 \end{figure}
 
@@ -80,7 +80,7 @@ U cilju grafičke analize podataka, korišćeni su sledeći prikazi:
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{scatter_starost_vs_cena.png}
-    \caption{Raspodela cene u odnosu na starost vozila (2025 - godina proizvodnje)}
+    \caption{Raspodela cijene u odnosu na starost vozila}
     \label{fig:starost_vs_cena}
 \end{figure}
 
@@ -89,19 +89,19 @@ U cilju grafičke analize podataka, korišćeni su sledeći prikazi:
 Na osnovu vizuelne analize identifikovani su sledeći obrasci:
 
 \begin{itemize}
-    \item \textbf{Distribucija cena je snažno asimetrična} (Slika~\ref{fig:hist_cena}) – većina vozila se prodaje ispod 20\,000 EUR, dok manji broj primera sa cenama od 100\,000+ EUR značajno odskače. To je bio motiv za korišćenje kvantilnog filtra ($q=0.90$).
+    \item \textbf{Distribucija cijena je snažno asimetrična} (Slika~\ref{fig:hist_cena}) – većina vozila se prodaje ispod 20\,000 EUR, dok manji broj primjera sa cijenama od 100\,000+ EUR značajno odskače.
     
-    \item \textbf{Prisustvo outlier-a potvrđeno je boxplot-om} (Slika~\ref{fig:box_cena}) – postoje brojni ekstremi koji narušavaju raspodelu ciljne promenljive i negativno utiču na RMSE.
+    \item \textbf{Prisustvo outlier-a potvrđeno je boxplot-om} (Slika~\ref{fig:box_cena}) – postoje brojni ekstremi koji narušavaju raspodjelu ciljne promjenljive i negativno utiču na RMSE.
 
-    \item \textbf{Starost vozila i cena imaju blago pozitivnu korelaciju} ($r = 0.18$), što je neintuitivno. Ova pojava objašnjava se asimetričnom strukturom podataka – (Slika~\ref{fig:starost_vs_cena}) pokazuje da je većina novih vozila luksuzna i značajno skuplja, dok su starija brojna, ali jeftinija. Time dolazi do vizuelne nelinearnosti i "lažne" pozitivne korelacije.
+    \item \textbf{Starost vozila i cijena imaju blago pozitivnu korelaciju} ($r = 0.18$), što je neočekivano. Međutim, scatterplot (Slika~\ref{fig:starost_vs_cena}) pokazuje da najskuplji automobili nisu novi, već stari — vjerovatno luksuzni, sportski ili kolekcionarski modeli. Većina novijih automobila (0–5 godina starosti) ima prosječnu ili nisku cenu, dok ekstremno visoke vrednosti dolaze od nekoliko skupocjenih vozila koja su stara 10+ godina. Ova nelinearna struktura dovodi do “lažne” pozitivne korelacije u linearnom smislu, iako bi se očekivala negativna veza između cijene i starosti.
 
-    \item \textbf{Kilometraža ima vrlo slab odnos sa cenom} ($r = 0.03$) – korisnici očigledno ne rangiraju ovaj faktor visoko pri određivanju cene.
+    \item \textbf{Kilometraža ima vrlo slab odnos sa cijenom} ($r = 0.03$) – korisnici očigledno ne rangiraju ovaj faktor visoko pri određivanju cene.
 
     \item \textbf{Konjske snage i zapremina motora su visoko korelisani} ($r = 0.82$, Slika~\ref{fig:corr_matrix}) – što je i očekivano s obzirom na tehničku povezanost tih karakteristika.
 
     \item \textbf{Kategorijske promenljive su raznovrsne i zahtevaju kodiranje}:
     \begin{itemize}
-        \item Marka: 44 vrednosti (najčešći: Opel, VW, BMW)
+        \item Marka: 44 vrednosti
         \item Grad: 236 različitih mesta (visoka disperzija)
         \item Karoserija i Gorivo: po 8 klasa
         \item Menjač: 2 klase (Manuelni i Automatski)
@@ -110,14 +110,40 @@ Na osnovu vizuelne analize identifikovani su sledeći obrasci:
 
 \section{Preprocesiranje podataka}
 
-Preprocesiranje je uključivalo sledeće korake:
+Pre nego što je model treniran, podaci su prošli kroz preprocesiranje sa ciljem da se obezbjedi robusnost modela i smanji uticaj ekstremnih vrednosti.
+
 \begin{itemize}
-    \item Kategoričke promenljive kodirane su pomoću One-Hot Encoding-a
-    \item Numeričke promenljive standardizovane su pomoću \texttt{StandardScaler}
-    \item Kreirana je nova numerička osobina -- starost automobila: \texttt{Starost = 2025 - Godina proizvodnje}
-    \item Za numeričke osobine dodati su kvadratni (polinomski) termini kako bi se omogućili nelinearni odnosi
-    \item Target varijabla (\texttt{Cena}) je log-transformisana kako bi se smanjio uticaj velikih vrednosti
+    \item \textbf{Filtriranje cijena} – Na osnovu prethodne analize, identifikovani su automobili sa ekstremno visokim cijenama (iznad 100\,000 EUR), koji značajno narušavaju distribuciju ciljne promenljive i utiču na RMSE. Umesto kvantilnog filtra, primenjena je jednostavna prag-filtracija: u dalji rad uključeni su samo primeri sa cijenom manjom ili jednakom \textbf{50\,000 EUR}. Time je uklonjen uticaj luksuznih i atipičnih vozila.
+
+    \item \textbf{Uklanjanje duplikata} – Prije treniranja modela, duplirani oglasi su uklonjeni pomoću \texttt{drop\_duplicates()} metode.
+
+    \item \textbf{Inženjering osobina} – Iz atributa \texttt{Godina proizvodnje} kreirana je nova numerička promjenljiva \texttt{Starost}, izračunata kao $2025 - \text{Godina proizvodnje}$. Ova osobina bolje opisuje uticaj vremena na gubitak vrijednosti vozila i zamjenjuje sirovu godinu.
+
+    \item \textbf{Obrada numeričkih podataka} – Odabrane numeričke promjenljive su:
+    \begin{itemize}
+        \item \texttt{Starost}
+        \item \texttt{Zapremina motora}
+        \item \texttt{Kilometraža}
+        \item \texttt{Konjske snage}
+    \end{itemize}
+    Kako bi model mogao da uoči nelinearne zavisnosti, na njih je primjenjena polinomska transformacija drugog stepena. Nakon toga, sve numeričke osobine su standardizovane (\texttt{StandardScaler}), što znači da je na njih primenjena z-score transformacija.
+
+    \item \textbf{Obrada kategoričkih podataka} – Sledeće kolone su tretirane kao kategoričke:
+    \begin{itemize}
+        \item \texttt{Marka}, \texttt{Grad}, \texttt{Karoserija}, \texttt{Gorivo}, \texttt{Menjač}
+    \end{itemize}
+    Svaka od njih je kodirana tehnikom \textbf{One-Hot Encoding} kako bi se izbjegle greške pri predikciji na test skupu.
+
+    \item \textbf{Log-transformacija ciljne promenljive} – Cijena automobila, kao ciljna promenljiva, ima izraženu asimetričnu raspodjelu sa teškim desnim repom. Da bi se smanjio uticaj outlier-a i poboljšala stabilnost modela, izvršena je log-transformacija putem funkcije $\log(1 + y)$ pomoću \texttt{FunctionTransformer}. Predikcije su potom inverzno transformisane pomoću $\exp(y) - 1$.
+	\begin{figure}[H]
+	    \centering
+	    \includegraphics[width=\textwidth]{log_transformacija_cena.png}
+	    \caption{Distribucija ciljne promenljive pre i posle log-transformacije}
+	    \label{fig:log_transform}
+	\end{figure}
 \end{itemize}
+
+Nakon svih koraka, numeričke i kategoričke komponente objedinjene su pomoću \texttt{ColumnTransformer}. Transformacija ciljne promenljive vršena je korišćenjem \texttt{TransformedTargetRegressor}, čime se obezbeđuje konzistentna transformacija pri treniranju i predikciji.
 
 \section{Podela skupa podataka}
 

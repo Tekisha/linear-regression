@@ -8,7 +8,7 @@ df = pd.read_csv("train.tsv", sep="\t")
 
 # Osnovne informacije
 print("Dimenzije skupa:", df.shape)
-print("\nBroj nedostajućih vrednosti po kolonama:")
+print("\nBroj nedostajućih vrijednosti po kolonama:")
 print(df.isna().sum())
 
 # Uklanjanje duplikata
@@ -46,14 +46,14 @@ for col in kategoricke:
 # Vizualizacije:
 plt.figure(figsize=(10, 5))
 sns.histplot(df["Cena"], kde=True, bins=50)
-plt.title("Distribucija cena")
-plt.xlabel("Cena (EUR)")
+plt.title("Distribucija cijena")
+plt.xlabel("Cijena (EUR)")
 plt.tight_layout()
 plt.savefig("hist_cena.png")
 
 plt.figure(figsize=(8, 6))
 sns.boxplot(x=df["Cena"])
-plt.title("Boxplot cena")
+plt.title("Boxplot cijena")
 plt.tight_layout()
 plt.savefig("box_cena.png")
 
@@ -69,8 +69,8 @@ df["Starost"] = 2025 - df["Godina proizvodnje"]
 
 plt.figure(figsize=(8, 5))
 sns.scatterplot(data=df, x="Starost", y="Cena", alpha=0.5)
-plt.title("Cena u odnosu na starost automobila")
+plt.title("Cijena u odnosu na starost automobila")
 plt.xlabel("Starost vozila (godine)")
-plt.ylabel("Cena [EUR]")
+plt.ylabel("Cijena [EUR]")
 plt.tight_layout()
 plt.savefig("scatter_starost_vs_cena.png")
