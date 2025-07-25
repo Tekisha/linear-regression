@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import KFold, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
@@ -9,27 +9,25 @@ from sklearn.metrics import make_scorer, mean_squared_error
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.preprocessing import FunctionTransformer
+import sys
 
-def main(q=1.00, alphas=None, n_splits=10):
-    # 1. Učitavanje i drop_duplicates
-    df0 = pd.read_csv("train.tsv", sep="\t").drop_duplicates()
+Q = 0.90
+PRICE_THRESHOLD = 50000
+ALPHAS = np.logspace(-4, 2, 100)
+N_SPLITS = 5
+CURRENT_YEAR = 2025
 
-    # 2. Filtriranje po kvantilu
-    if q < 1.0:
-        th = df0["Cena"].quantile(q)
-        df = df0[df0["Cena"] <= th].reset_index(drop=True)
-        print(f"Kvantил {q:.2f} (prag={th:.0f} EUR) → {len(df)} uzoraka")
-    else:
-        df = df0
-        print(f"Koristimo ceo skup: {len(df)} uzoraka")
 
-    CURRENT_YEAR = 2025
-    df["Starost"] = CURRENT_YEAR - df["Godina proizvodnje"]
+def run_training(df_train: pd.DataFrame):
+    df0 = df_train.drop_duplicates()
 
-    X = df.drop(columns=["Cena"])
-    y = df["Cena"]
+    df0 = df0[df0["Cena"] <= PRICE_THRESHOLD].reset_index(drop=True)
 
-    # 3. Pipeline definicija
+    df0["Starost"] = CURRENT_YEAR - df0["Godina proizvodnje"]
+
+    X = df0.drop(columns=["Cena"])
+    y = df0["Cena"]
+
     num_feats = ["Starost", "Zapremina motora", "Kilometraza", "Konjske snage"]
     cat_feats = ["Marka", "Grad", "Karoserija", "Gorivo", "Menjac"]
 
@@ -47,12 +45,9 @@ def main(q=1.00, alphas=None, n_splits=10):
         ("cat", cat_pipe, cat_feats),
     ])
 
-    # 4. LassoCV unutar pipeline
-    if alphas is None:
-        alphas = np.logspace(-3, 3, 50)
     base_pipeline = Pipeline([
         ("prep", preprocessor),
-        ("lasso", LassoCV(alphas=alphas, cv=5, random_state=42, n_jobs=-1, max_iter=5000))
+        ("lasso", LassoCV(alphas=ALPHAS, cv=5, random_state=42, n_jobs=-1, max_iter=10000))
     ])
 
     ttr = TransformedTargetRegressor(
@@ -61,31 +56,56 @@ def main(q=1.00, alphas=None, n_splits=10):
                                         inverse_func=np.expm1)
     )
 
-    # 5. Definišemo scorer za RMSE
     rmse_scorer = make_scorer(mean_squared_error, squared=False)
 
-    # 6. K-fold cross-validation
-    cv = KFold(n_splits=n_splits, shuffle=True, random_state=42)
-    # cross_val_score će pozvati fit/predict za svaki fold; LassoCV će unutar toga optimizovati alpha
+    cv = KFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
     scores = cross_val_score(ttr, X, y,
                              scoring=rmse_scorer,
                              cv=cv,
                              n_jobs=-1)
 
-    print(f"{n_splits}-fold CV RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
+    #print(f"{N_SPLITS}-fold CV RMSE: {scores.mean():.2f} ± {scores.std():.2f} EUR")
 
-    # 7. Finalno fitovanje na celom skupu i best alpha
     ttr.fit(X, y)
-    best_alpha = ttr.regressor_.named_steps["lasso"].alpha_
-    print(f"Best α (na celom skupu): {best_alpha:.5f}")
+    #best_alpha = ttr.regressor_.named_steps["lasso"].alpha_
+    #print(f"Best α (na celom skupu): {best_alpha:.5f}")
 
-    return {
-        "cv_rmse_mean": scores.mean(),
-        "cv_rmse_std": scores.std(),
-        "best_alpha": best_alpha,
-        "model": ttr
-    }
+    return ttr
+
+
+def run_prediction(model_test, df_test: pd.DataFrame):
+    df_test = df_test.copy()
+    df_test["Starost"] = CURRENT_YEAR - df_test["Godina proizvodnje"]
+    X_test = df_test.drop(columns=["Cena"], errors="ignore")
+
+    preds = model_test.predict(X_test)
+    rmse = mean_squared_error(df_test["Cena"], preds, squared=False)
+    print(rmse)
 
 
 if __name__ == "__main__":
-    stats = main(q=0.90, alphas=np.logspace(-4, 2, 100), n_splits=5)
+    if len(sys.argv) == 3:
+        train_df = pd.read_csv(sys.argv[1], sep="\t")
+        test_df = pd.read_csv(sys.argv[2], sep="\t")
+        model = run_training(train_df)
+        run_prediction(model, test_df)
+
+    elif len(sys.argv) == 2:
+        df = pd.read_csv(sys.argv[1], sep="\t").drop_duplicates()
+        df = df[df["Cena"] <= PRICE_THRESHOLD].reset_index(drop=True)
+
+        df['price_bin'] = pd.qcut(df['Cena'], q=5, labels=False, duplicates='drop')
+
+        train_df, test_df = train_test_split(
+            df,
+            test_size=0.2,
+            random_state=42,
+            stratify=df['price_bin']
+        )
+        train_df = train_df.drop(columns=['price_bin'])
+        test_df = test_df.drop(columns=['price_bin'])
+
+        #print(f"Укупно {len(df)} узорака → Train: {len(train_df)}, Test: {len(test_df)}")
+
+        model = run_training(train_df)
+        run_prediction(model, test_df)

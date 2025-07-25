@@ -1,0 +1,162 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[serbian]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{siunitx} 
+\sisetup{group-separator = {\,}, group-minimum-digits = 4} 
+
+
+\title{Višestruka regresija za predikciju cijene automobila u Srbiji}
+\author{Teodor Vidaković}
+\date{Jul 2025}
+
+\begin{document}
+\maketitle
+
+\section{Eksplorativna analiza podataka}
+
+Dataset sadrži informacije o oglasima polovnih automobila u Srbiji. Skup podataka ima ukupno 1756 primjera i 10 kolona, pri čemu ne postoje nedostajuće vrednosti. Korišćene kolone uključuju: \texttt{Marka}, \texttt{Grad}, \texttt{Godina proizvodnje}, \texttt{Karoserija}, \texttt{Gorivo}, \texttt{Zapremina motora}, \texttt{Kilometraža}, \texttt{Konjske snage}, \texttt{Menjač} i ciljnu promenljivu \texttt{Cena}.
+
+\subsection{Osnovne statistike}
+
+Nakon uklanjanja duplikata, ostaje 1353 validnih zapisa. Osnovne statistike za numeričke promjenljive prikazane su u Tabeli 1.
+
+\begin{table}[H]
+\centering
+\caption{Osnovne statistike numeričkih promenljivih}
+\label{tab:statistika}
+\begin{tabularx}{\textwidth}{l *{6}{>{\raggedleft\arraybackslash}X}}
+\toprule
+\textbf{Atribut} & \textbf{Min} & \textbf{(25\%)} & \textbf{(50\%)} & \textbf{(75\%)} & \textbf{Max} & \textbf{Srednja} \\
+\midrule
+Cijena [EUR] & \num{1000} & \num{3000} & \num{5900} & \num{13500} & \num{999000} & \num{45027} \\
+Godina proizvodnje & 1894 & 2006 & 2010 & 2015 & 2025 & 2010 \\
+Zapremina motora [cm$^3$] & \num{163} & \num{1398} & \num{1600} & \num{1984} & \num{5461} & \num{1742.6} \\
+Kilometraža [km] & \num{1000} & \num{165563} & \num{209000} & \num{256000} & \num{552000} & \num{206512} \\
+Konjske snage & \num{45} & \num{92} & \num{116} & \num{150} & \num{620} & \num{129.5} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Vidimo da su cijene veoma varijabilne, pri čemu se maksimalna cijena kreće i do 999\,000 EUR, što ukazuje na prisustvo outlier-a. Većina automobila ima pređeno između 150\,000 i 300\,000 kilometara.
+
+\subsection{Vizuelizacije}
+
+U cilju grafičke analize podataka, korišćeni su sledeći prikazi:
+
+\begin{itemize}
+    \item \textbf{Histogram distribucije cena} (Slika~\ref{fig:hist_cena})
+    \item \textbf{Boxplot cena} (Slika~\ref{fig:box_cena})
+    \item \textbf{Korelaciona matrica numeričkih promenljivih} (Slika~\ref{fig:corr_matrix})
+    \item \textbf{Scatterplot: Cena vs. Starost vozila} (Slika~\ref{fig:starost_vs_cena})
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{hist_cena.png}
+    \caption{Distribucija cena automobila}
+    \label{fig:hist_cena}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{box_cena.png}
+    \caption{Boxplot cena automobila}
+    \label{fig:box_cena}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.65\textwidth]{corr_matrix.png}
+    \caption{Korelaciona matrica numeričkih atributa}
+    \label{fig:corr_matrix}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{scatter_starost_vs_cena.png}
+    \caption{Raspodela cene u odnosu na starost vozila (2025 - godina proizvodnje)}
+    \label{fig:starost_vs_cena}
+\end{figure}
+
+\subsection{Uočeni obrasci i anomalije}
+
+Na osnovu vizuelne analize identifikovani su sledeći obrasci:
+
+\begin{itemize}
+    \item \textbf{Distribucija cena je snažno asimetrična} (Slika~\ref{fig:hist_cena}) – većina vozila se prodaje ispod 20\,000 EUR, dok manji broj primera sa cenama od 100\,000+ EUR značajno odskače. To je bio motiv za korišćenje kvantilnog filtra ($q=0.90$).
+    
+    \item \textbf{Prisustvo outlier-a potvrđeno je boxplot-om} (Slika~\ref{fig:box_cena}) – postoje brojni ekstremi koji narušavaju raspodelu ciljne promenljive i negativno utiču na RMSE.
+
+    \item \textbf{Starost vozila i cena imaju blago pozitivnu korelaciju} ($r = 0.18$), što je neintuitivno. Ova pojava objašnjava se asimetričnom strukturom podataka – (Slika~\ref{fig:starost_vs_cena}) pokazuje da je većina novih vozila luksuzna i značajno skuplja, dok su starija brojna, ali jeftinija. Time dolazi do vizuelne nelinearnosti i "lažne" pozitivne korelacije.
+
+    \item \textbf{Kilometraža ima vrlo slab odnos sa cenom} ($r = 0.03$) – korisnici očigledno ne rangiraju ovaj faktor visoko pri određivanju cene.
+
+    \item \textbf{Konjske snage i zapremina motora su visoko korelisani} ($r = 0.82$, Slika~\ref{fig:corr_matrix}) – što je i očekivano s obzirom na tehničku povezanost tih karakteristika.
+
+    \item \textbf{Kategorijske promenljive su raznovrsne i zahtevaju kodiranje}:
+    \begin{itemize}
+        \item Marka: 44 vrednosti (najčešći: Opel, VW, BMW)
+        \item Grad: 236 različitih mesta (visoka disperzija)
+        \item Karoserija i Gorivo: po 8 klasa
+        \item Menjač: 2 klase (Manuelni i Automatski)
+    \end{itemize}
+\end{itemize}
+
+\section{Preprocesiranje podataka}
+
+Preprocesiranje je uključivalo sledeće korake:
+\begin{itemize}
+    \item Kategoričke promenljive kodirane su pomoću One-Hot Encoding-a
+    \item Numeričke promenljive standardizovane su pomoću \texttt{StandardScaler}
+    \item Kreirana je nova numerička osobina -- starost automobila: \texttt{Starost = 2025 - Godina proizvodnje}
+    \item Za numeričke osobine dodati su kvadratni (polinomski) termini kako bi se omogućili nelinearni odnosi
+    \item Target varijabla (\texttt{Cena}) je log-transformisana kako bi se smanjio uticaj velikih vrednosti
+\end{itemize}
+
+\section{Podela skupa podataka}
+
+Podaci su podeljeni korišćenjem K-Fold cross-validation (n = 5 ili 10, u zavisnosti od eksperimenta). Kod eksperimenata sa kvantilnim filterom $q=0.90$, treniralo se samo na 90\% najjeftinijih automobila, dok je cilj bio generalizacija uz niži RMSE.
+
+\section{Isprobani algoritmi}
+
+Korišćen je \texttt{LassoCV} iz \texttt{scikit-learn}, zbog sposobnosti automatske selekcije osobina i regularizacije.
+
+\subsection{Podešavanje hiperparametara}
+
+\texttt{LassoCV} automatski bira vrednost regularizacionog parametra $\alpha$ testiranjem više vrednosti (logspace između $10^{-4}$ i $10^2$). Najbolja vrednost $\alpha$ pronađena je unutar svakog CV fold-a.
+
+\subsection{Rezultati}
+
+Na 5-fold cross-validaciji sa $q=0.90$, postignut je sledeći rezultat:
+\[
+\text{RMSE (log-transformisan target)} = \textbf{6361.27 ± 312.45 EUR}
+\]
+
+što je ispod zadatog praga od 6500 EUR.
+
+\section{Odabrano rešenje}
+
+Finalno rešenje koristi sledeće komponente:
+\begin{itemize}
+    \item Preprocesiranje: polinomske osobine + standardizacija + one-hot encoding
+    \item Regresor: \texttt{LassoCV} sa automatskom selekcijom $\alpha$
+    \item Transformacija ciljne promenljive: $\log(1 + y)$
+\end{itemize}
+
+Ova konfiguracija pokazala se kao najefikasnija u smislu balansa kompleksnosti i performansi, omogućavajući robusnu generalizaciju uz ispunjavanje uslova zadatka.
+
+\section*{Reference}
+
+\begin{itemize}
+    \item Pedregosa et al., \textit{Scikit-learn: Machine Learning in Python}, JMLR 2011.
+    \item zvanična dokumentacija: \url{https://scikit-learn.org/stable/}
+    \item Dataset: Oglasi automobila u Srbiji (projekat FTN, 2025)
+\end{itemize}
+
+\end{document}
